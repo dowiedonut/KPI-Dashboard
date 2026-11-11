@@ -544,7 +544,7 @@ const MONTH_ORDER = ["July 2026","August 2026","September 2026","October 2026"];
 let currentMonth = MONTH_ORDER[MONTH_ORDER.length-1];
 let DATA = MONTHS[currentMonth];
 const MONTH_BANNERS = {
-  "October 2026": '<strong>Draft October numbers, waiting on LCAM sign off.</strong> Revenue comes from the whole company QuickBooks P&amp;L split by customer, plus a few clients billed in October but not yet on the cash basis P&amp;L, so Unclaimed Income is $0. Lavin is new this month in Vikas\'s silo, with his cost split by where he worked. LCAM capacity is now 88 hrs (70% billable of a 32-hour week), up from 53. T&amp;R moved from Melissa to Liz.',
+  "October 2026": '<strong>Final October numbers.</strong> Revenue comes from the whole company QuickBooks P&amp;L split by customer, plus a few clients billed in October but not yet on the cash basis P&amp;L, so Unclaimed Income is $0. Lavin is new this month in Vikas\'s silo, with his cost split by where he worked. LCAM capacity is now 88 hrs (70% billable of a 32-hour week), up from 53.',
   "July 2026": '<strong>Final July numbers.</strong> Revenue, cost, margin, capacity, and Software &amp; Other Monthly Costs are all real for every silo, and Total Company Revenue is pulled independently from the whole company QuickBooks P&amp;L. Unclaimed Income is running close to $30,000 this month, worth tracking month to month as an ongoing pattern rather than a one time error.',
   "September 2026": '<strong>Final September numbers.</strong> Shilpa now has her own silo (Daljit\'s and Shilpa\'s clients moved out of Melissa\'s). Silo revenue and costs come from the whole company QuickBooks P&amp;L split by customer, so every dollar is assigned to a silo and Unclaimed Income is $0. Use the View buttons to see one silo at a time.',
   "August 2026": '<strong>Final August numbers.</strong> Revenue, cost, margin, capacity, and Software &amp; Other Monthly Costs are all real for every silo, and Total Company Revenue is pulled independently from the whole company QuickBooks P&amp;L. Click any silo, a card, a bar, a row, to see who\'s in it.'
@@ -562,6 +562,38 @@ const SILO_COLOR_HEX = {
 const SILO_ORDER = ['Melissa','Shilpa','Liz','Becca','Vikas','Michelle','S+S','Simplified Team'];
 const LCAMS = ['Melissa','Shilpa','Liz','Becca','Vikas','Michelle'];
 const VIEW_SILOS = LCAMS.concat(['S+S','Simplified Team']);
+const LCAM_ONLY = false;
+if (LCAM_ONLY) {
+  const KEEP = ['Melissa','Shilpa','Liz','Becca','Vikas'];
+  [SILO_ORDER, LCAMS, VIEW_SILOS].forEach(arr => { for (let i = arr.length - 1; i >= 0; i--) if (!KEEP.includes(arr[i])) arr.splice(i, 1); });
+  Object.keys(MONTHS).forEach(m => {
+    const d = MONTHS[m];
+    d.silos = d.silos.filter(s => KEEP.includes(s.name));
+    Object.keys(d.silo_team).forEach(k => { if (!KEEP.includes(k)) delete d.silo_team[k]; });
+    Object.keys(d.silo_clients).forEach(k => { if (!KEEP.includes(k)) delete d.silo_clients[k]; });
+    d.employees = d.employees.filter(e => Object.keys(e.pct || {}).some(k => KEEP.includes(k))).map(e => {
+      const pct = {}; Object.keys(e.pct).forEach(k => { if (KEEP.includes(k)) pct[k] = e.pct[k]; });
+      return Object.assign({}, e, {pct: pct, silos: e.silos.filter(s => KEEP.includes(s))});
+    });
+    const team = new Set(); Object.values(d.silo_team).forEach(arr => arr.forEach(p => team.add(p.name)));
+    const empNames = new Set(d.employees.map(e => e.name));
+    if (d.hours_breakdown) d.hours_breakdown = d.hours_breakdown.filter(r => empNames.has(r.name));
+    const sum = f => d.silos.reduce((a, s) => a + (s[f] || 0), 0);
+    const t = d.totals;
+    t.exp_rev = sum('exp_rev'); t.act_rev = sum('act_rev'); t.exp_hrs = sum('exp_hrs'); t.act_hrs = sum('act_hrs');
+    t.total_cost = sum('cost');
+    const expCost = d.silos.reduce((a, s) => a + (s.margin_expected != null ? s.exp_rev * (1 - s.margin_expected / 100) : s.cost), 0);
+    t.rev_per_hr_expected = t.exp_hrs ? t.exp_rev / t.exp_hrs : 0;
+    t.rev_per_hr_actual = t.act_hrs ? t.act_rev / t.act_hrs : 0;
+    t.margin_actual = t.act_rev ? Math.round((t.act_rev - t.total_cost) / t.act_rev * 1000) / 10 : null;
+    t.margin_expected = t.exp_rev ? Math.round((t.exp_rev - expCost) / t.exp_rev * 1000) / 10 : null;
+    t.total_clients = Object.values(d.silo_clients).reduce((a, c) => a + c.length, 0);
+    t.total_people = d.employees.length;
+    t.total_company_revenue = t.act_rev; t.qbo_total = t.act_rev; t.unclaimed_income = 0;
+    MONTH_BANNERS[m] = '<strong>' + m + ' numbers, LCAM silos.</strong> Melissa, Shilpa, Liz, Becca and Vikas only. Totals and averages on this page combine these five silos.';
+  });
+}
+
 let currentView = 'All SOAN';
 let SILO_BY_NAME = {};
 
@@ -770,7 +802,7 @@ function buildOverview() {
   const t = DATA.totals;
   const tc = htmlNode('div', 'silo-card total-card');
   const nr = htmlNode('div', 'name'); nr.appendChild(document.createTextNode('All silos')); tc.appendChild(nr);
-  tc.appendChild(htmlNode('div', 'role', 'SOAN total'));
+  tc.appendChild(htmlNode('div', 'role', LCAM_ONLY ? 'LCAM silos total' : 'SOAN total'));
   const gr = htmlNode('div', 'gauge-row'); gr.appendChild(radialGauge(t.exp_hrs > 0 ? t.act_hrs / t.exp_hrs * 100 : 0, 52));
   const gt = htmlNode('div'); gt.style.fontSize = '11px'; gt.style.color = 'var(--text-muted)'; gt.innerHTML = 'billable<br>hrs'; gr.appendChild(gt); tc.appendChild(gr);
   const r1 = htmlNode('div', 'rev'); r1.innerHTML = '<b>' + fmtMoney(t.act_rev) + '</b> actual'; tc.appendChild(r1);
@@ -1159,9 +1191,14 @@ function wireThemeToggle() {
 function renderAll() {
   SILO_BY_NAME = {};
   DATA.silos.forEach(s => SILO_BY_NAME[s.name] = s);
-  document.title = 'SOAN KPI Dashboard - ' + currentMonth;
+  document.title = (LCAM_ONLY ? 'SOAN LCAM KPI Dashboard - ' : 'SOAN KPI Dashboard - ') + currentMonth;
+  if (LCAM_ONLY) {
+    document.querySelectorAll('#soanView h2.section-title .sub').forEach(s => { if (s.textContent === 'All silos combined') s.textContent = 'The five LCAM silos combined'; });
+    document.querySelectorAll('.card-head p.note').forEach(n => { if (n.textContent.startsWith('Total Company Revenue is the independent')) n.textContent = 'The five LCAM silos combined (Melissa, Shilpa, Liz, Becca, Vikas).'; });
+  }
+  if (LCAM_ONLY) { const cr = document.getElementById('costRow'); if (cr) { cr.style.display = 'none'; const hh = cr.previousElementSibling; if (hh) hh.style.display = 'none'; } const sc0 = document.getElementById('siloCount'); }
   const titleEl = document.getElementById('dashTitle');
-  if (titleEl) titleEl.textContent = 'SOAN Monthly KPI Dashboard - ' + currentMonth;
+  if (titleEl) titleEl.textContent = (LCAM_ONLY ? 'SOAN LCAM KPI Dashboard - ' : 'SOAN Monthly KPI Dashboard - ') + currentMonth;
   const bannerEl = document.getElementById('infoBanner');
   if (bannerEl) bannerEl.innerHTML = MONTH_BANNERS[currentMonth] || ('<strong>' + currentMonth + ' numbers.</strong>');
   const footerEl = document.getElementById('dashFooter');
@@ -1252,6 +1289,7 @@ function buildToc() {
   let targets = [];
   if (currentView === 'All SOAN') {
     document.querySelectorAll('#soanView h2.section-title').forEach(el => {
+      if (el.style.display === 'none') return;
       const t = el.querySelector('.titlewrap'); targets.push([el, (t ? t.textContent : el.textContent).trim()]);
     });
   } else {
@@ -1292,7 +1330,7 @@ function buildViewTabs() {
     const available = v === 'All SOAN' || !!SILO_BY_NAME[v];
     btn.className = 'view-tab' + (v === currentView ? ' active' : '') + (available ? '' : ' disabled');
     if (v !== 'All SOAN') { const d = htmlNode('span', 'vdot'); d.style.background = SILO_COLOR_HEX[v]; btn.appendChild(d); }
-    btn.appendChild(document.createTextNode(v));
+    btn.appendChild(document.createTextNode(LCAM_ONLY && v === 'All SOAN' ? 'All LCAMs' : v));
     if (!available) { btn.title = v + ' did not have a silo in ' + currentMonth; btn.disabled = true; }
     btn.addEventListener('click', () => {
       if (!available || v === currentView) return;
@@ -1522,6 +1560,7 @@ function buildTrendsSection() {
     ['Actual Billable Hours (All Silos)', ...MONTH_ORDER.map(m => fmtHrs(MONTHS[m].totals.act_hrs))],
     ['Billable share of all hours (target 70%)', ...MONTH_ORDER.map(m => { const hb = MONTHS[m].hours_breakdown; if (!hb) return 'n/a'; const B = hb.reduce((a,r)=>a+r.billable,0), N = hb.reduce((a,r)=>a+r.nonbillable,0); return Math.round(B/(B+N)*100) + '%'; })],
   ];
+  if (LCAM_ONLY) { for (let i = companyRows.length - 1; i >= 0; i--) if (/Total Company Revenue|Unclaimed/.test(companyRows[i][0])) companyRows.splice(i, 1); companyRows.forEach(r => { r[0] = r[0].replace('(All Silos)', '(LCAM silos)').replace('Claimed by Silos', '(LCAM silos)').replace('Company Profit Margin', 'Profit Margin, LCAM silos').replace('Total Dept Cost', 'Total Cost, LCAM silos'); }); }
   const companyHeaders = ['Metric', ...MONTH_ORDER];
   const companyEl = document.getElementById('trendsCompanyTable');
   if (companyEl) { companyEl.innerHTML = ''; companyEl.appendChild(buildTable(companyHeaders, companyRows)); }
